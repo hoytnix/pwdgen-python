@@ -1,0 +1,6 @@
+# All secret files.
+secret*
+
+# Byte-code.
+*.pyc
+__pycache__/
