@@ -1,1 +1,1 @@
-oscrypto
+python-gnupg

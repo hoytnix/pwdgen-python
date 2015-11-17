@@ -1,8 +1,12 @@
 from time import time
+import gnupg, os.path
+from urllib.parse import urlparse
 
-from crypto import encrypt, decrypt
 from jsondb import Jsondb
-from secret import CSV_FP
+from secret import CSV_FP, APP_FP, LIB_FP
+
+_CIPHER_ALGO = 'RSA'
+_CIPHER_BYTE = 2048
 
 def import_csv(fp):
     '''
@@ -28,26 +32,81 @@ def import_csv(fp):
 def b(str):
     return bytes(str, encoding='utf-8')
 
-def main():
-    # url,username,password,extra,name,grouping,fav
+def rand_str(length=32):
+    from string import ascii_letters, digits, punctuation
+    from random import choice
+
+    c = ''.join([ascii_letters, digits])
+    text = ''
+
+    for i in range(length):
+        text += choice(c)
+
+    return text
+
+def encrypt_all(gpg, fingerprint):
+    # Storage
     store = import_csv(fp=CSV_FP)
-    
-    #i = 0
-    #with open('mmm.csv', 'w+') as f:
+    db = Jsondb(f=LIB_FP, mode='w+')
+
     for key in store:
+        fp = rand_str()
         d = store[key]
 
-        password = b(d['password'])
-        username = b(d['username'])
-        url      = b(d['url'])
+        password = d['password']
+        username = d['username']
+        url      = d['url']
 
-        _password = encrypt(data = password)
-        if username != '':
-            _username = encrypt(data = username)
-        else:
-            _username = 'None'
+        db.db[url] = fp
 
-        print(url, _username, _password)
+        file_data = '{password}\n{username}'.format(password=password, username=username)
+
+        output_r = os.path.join(APP_FP, fp)
+        gpg.encrypt(data = file_data, recipients = fingerprint, passphrase = 'x', output = output_r)
+
+    db.save()
+
+def decrypt_all(gpg, fingerprint):
+    # Storage
+    db = Jsondb(f=LIB_FP, mode='r')
+
+    for key in db.db:
+        fp = os.path.join(APP_FP, db.db[key])
+        f = open(fp, 'rb')
+        d = gpg.decrypt_file(f, passphrase = 'x')
+        s = str(d)
+        print(s.split('\n'), key)
+
+def decrypt(key, gpg, fingerprint):
+    # Storage.
+    db = Jsondb(f=LIB_FP, mode='r')
+
+    # Find file.
+    fp = None
+    netloc = urlparse(key).netloc
+    for db_key in db.db:
+        if netloc.lower() in db_key.lower():
+            fp = os.path.join(APP_FP, db.db[db_key])
+
+    if fp:
+        with open(fp, 'rb') as f:
+            d = gpg.decrypt_file(f, passphrase = 'x')
+            s = str(d)
+            print(s.split('\n'), key)
+
+def main():
+    # GPG
+    gpg = gnupg.GPG(gnupghome='x')
+    input_data = gpg.gen_key_input(key_type=_CIPHER_ALGO, key_length=_CIPHER_BYTE, passphrase='x')
+    key = gpg.gen_key(input_data)
+    fingerprint = key.fingerprint
+
+    ascii_armored_public_keys = gpg.export_keys(fingerprint)
+    ascii_armored_private_keys = gpg.export_keys(fingerprint, True) # True => private keys
+
+    encrypt_all(gpg = gpg, fingerprint = fingerprint)
+    decrypt(key = 'http://google.com', gpg = gpg, fingerprint = fingerprint)
+    #decrypt_all(gpg = gpg, fingerprint = fingerprint)
 
 if __name__ == '__main__':
     start = time()
